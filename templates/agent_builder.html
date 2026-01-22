@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Your Agent - Digital Lab</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .wizard-container {
+            max-width: 800px;
+            margin: 40px auto;
+            background: rgba(31, 41, 55, 0.8);
+            border: 1px solid rgba(244, 128, 32, 0.2);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .step-indicator {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 40px;
+            position: relative;
+        }
+
+        .step-indicator::before {
+            content: '';
+            position: absolute;
+            top: 15px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: rgba(107, 114, 128, 0.3);
+            z-index: 0;
+        }
+
+        .step {
+            position: relative;
+            z-index: 1;
+            background: #1f2937;
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #6b7280;
+            color: #6b7280;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .step.active {
+            border-color: #f48020;
+            background: #f48020;
+            color: white;
+            box-shadow: 0 0 15px rgba(244, 128, 32, 0.5);
+        }
+
+        .step.completed {
+            border-color: #10b981;
+            background: #10b981;
+            color: white;
+        }
+
+        .form-section {
+            display: none;
+            animation: fadeIn 0.5s ease;
+        }
+
+        .form-section.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        h2 {
+            color: #fff;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+
+        p.subtitle {
+            color: #9ca3af;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            color: #d1d5db;
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+
+        input,
+        select,
+        textarea {
+            width: 100%;
+            padding: 15px;
+            background: rgba(17, 24, 39, 0.6);
+            border: 1px solid rgba(75, 85, 99, 0.4);
+            border-radius: 10px;
+            color: #fff;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            border-color: #f48020;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(244, 128, 32, 0.1);
+        }
+
+        .tone-cards {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+        }
+
+        .tone-card {
+            background: rgba(17, 24, 39, 0.6);
+            border: 1px solid rgba(75, 85, 99, 0.4);
+            border-radius: 10px;
+            padding: 15px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .tone-card:hover {
+            border-color: #f48020;
+        }
+
+        .tone-card.selected {
+            background: rgba(244, 128, 32, 0.1);
+            border-color: #f48020;
+            box-shadow: 0 0 15px rgba(244, 128, 32, 0.2);
+        }
+
+        .nav-buttons {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 40px;
+            border-top: 1px solid rgba(75, 85, 99, 0.3);
+            padding-top: 20px;
+        }
+
+        .btn-prev {
+            padding: 12px 30px;
+            background: transparent;
+            border: 1px solid #6b7280;
+            color: #9ca3af;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .btn-next {
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #f48020, #fb923c);
+            border: none;
+            color: white;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wizard-container">
+        <div class="step-indicator">
+            <div class="step active">1</div>
+            <div class="step">2</div>
+            <div class="step">3</div>
+            <div class="step">4</div>
+        </div>
+
+        <form id="agentForm">
+            <!-- Step 1: Business Basics -->
+            <div class="form-section active" id="step1">
+                <h2>Business Profile</h2>
+                <p class="subtitle">Let's start with the basics of your business.</p>
+
+                <div class="form-group">
+                    <label>Business Name</label>
+                    <input type="text" name="business_name" placeholder="e.g. Acme Solar Solutions" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Industry</label>
+                    <select name="industry" required>
+                        <option value="">Select an industry...</option>
+                        <option value="Real Estate">Real Estate</option>
+                        <option value="Healthcare">Healthcare / Dental</option>
+                        <option value="Solar / Home Improvement">Solar / Home Improvement</option>
+                        <option value="Marketing Agency">Marketing Agency</option>
+                        <option value="SaaS / Tech">SaaS / Tech</option>
+                        <option value="E-commerce">E-commerce</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Step 2: Services -->
+            <div class="form-section" id="step2">
+                <h2>Services & Offerings</h2>
+                <p class="subtitle">What are you selling or scheduling?</p>
+
+                <div class="form-group">
+                    <label>What main service do you offer?</label>
+                    <textarea name="services" rows="4"
+                        placeholder="e.g. We offer residential solar panel installation and battery backup systems. We help homeowners save money on electricity bills."
+                        required></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>What is the goal of the call?</label>
+                    <select name="call_goal">
+                        <option value="Book a consultation">Book a consultation</option>
+                        <option value="Qualify a lead">Qualify a lead</option>
+                        <option value="Customer Support">Customer Support</option>
+                        <option value="Direct Sales">Direct Sales</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Step 3: Personality -->
+            <div class="form-section" id="step3">
+                <h2>Agent Personality</h2>
+                <p class="subtitle">How should your agent sound?</p>
+
+                <label>Tone of Voice</label>
+                <div class="tone-cards">
+                    <div class="tone-card selected" onclick="selectTone(this, 'Friendly & Energetic')">
+                        <div style="font-size: 24px;">😊</div>
+                        <div style="font-weight: 500; margin-top: 5px;">Friendly</div>
+                    </div>
+                    <div class="tone-card" onclick="selectTone(this, 'Professional & Formal')">
+                        <div style="font-size: 24px;">👔</div>
+                        <div style="font-weight: 500; margin-top: 5px;">Professional</div>
+                    </div>
+                    <div class="tone-card" onclick="selectTone(this, 'Empathetic & Calm')">
+                        <div style="font-size: 24px;">🧘</div>
+                        <div style="font-weight: 500; margin-top: 5px;">Empathetic</div>
+                    </div>
+                </div>
+                <input type="hidden" name="tone" id="toneInput" value="Friendly & Energetic">
+
+                <div class="form-group" style="margin-top: 25px;">
+                    <label>Agent Name</label>
+                    <input type="text" name="agent_name" value="Alex" placeholder="Name your agent">
+                </div>
+            </div>
+
+            <!-- Step 4: Preview & Launch -->
+            <div class="form-section" id="step4">
+                <h2>Ready to Launch!</h2>
+                <p class="subtitle">We're generating your custom AI agent...</p>
+
+                <div
+                    style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;">
+                    <div style="font-size: 40px; margin-bottom: 15px;">✨</div>
+                    <h3 style="color: #10b981; margin-bottom: 10px;">All Set!</h3>
+                    <p style="color: #d1d5db;">Click "Create Agent" to finalize your configuration. Your agent will be
+                        ready to take calls immediately.</p>
+                </div>
+            </div>
+
+            <div class="nav-buttons">
+                <button type="button" class="btn-prev" id="prevBtn" style="visibility: hidden">Back</button>
+                <button type="button" class="btn-next" id="nextBtn">Next Step</button>
+                <button type="submit" class="btn-next" id="submitBtn" style="display: none;">🚀 Create Agent</button>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        let currentStep = 1;
+        const totalSteps = 4;
+
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const submitBtn = document.getElementById('submitBtn');
+
+        function updateUI() {
+            // Update sections
+            document.querySelectorAll('.form-section').forEach(el => el.classList.remove('active'));
+            document.getElementById(`step${currentStep}`).classList.add('active');
+
+            // Update indicators
+            document.querySelectorAll('.step').forEach((el, index) => {
+                if (index < currentStep) el.classList.add('active');
+                else el.classList.remove('active');
+            });
+
+            // Update buttons
+            prevBtn.style.visibility = currentStep === 1 ? 'hidden' : 'visible';
+
+            if (currentStep === totalSteps) {
+                nextBtn.style.display = 'none';
+                submitBtn.style.display = 'block';
+            } else {
+                nextBtn.style.display = 'block';
+                submitBtn.style.display = 'none';
+            }
+        }
+
+        nextBtn.addEventListener('click', () => {
+            if (currentStep < totalSteps) {
+                currentStep++;
+                updateUI();
+            }
+        });
+
+        prevBtn.addEventListener('click', () => {
+            if (currentStep > 1) {
+                currentStep--;
+                updateUI();
+            }
+        });
+
+        function selectTone(card, tone) {
+            document.querySelectorAll('.tone-card').forEach(el => el.classList.remove('selected'));
+            card.classList.add('selected');
+            document.getElementById('toneInput').value = tone;
+        }
+
+        document.getElementById('agentForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData.entries());
+
+            // Show loading on button
+            submitBtn.textContent = 'Generating...';
+            submitBtn.disabled = true;
+
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch('/api/agent/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    window.location.href = '/dashboard';
+                } else {
+                    alert('Error: ' + result.error);
+                    submitBtn.textContent = 'Try Again';
+                    submitBtn.disabled = false;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Connection error');
+                submitBtn.textContent = 'Try Again';
+                submitBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+
+</html>

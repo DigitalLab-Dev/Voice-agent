@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Lab - AI Calling Agent Platform</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 40px 20px;
+        }
+
+        .hero-content {
+            max-width: 800px;
+        }
+
+        .hero h1 {
+            font-size: 64px;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #f48020, #fb923c);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: slideDown 0.8s ease;
+        }
+
+        .hero p {
+            font-size: 24px;
+            color: #9ca3af;
+            margin-bottom: 40px;
+            animation: slideUp 0.8s ease;
+        }
+
+        .cta-buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            animation: fadeIn 1s ease;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        /* Features Grid - 3 Column Layout */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 30px;
+            margin-top: 60px;
+            padding: 0 40px;
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .feature-card {
+            background: rgba(31, 41, 55, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 30px;
+            text-align: left;
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-10px);
+            border-color: var(--primary);
+            box-shadow: 0 20px 40px -10px rgba(244, 128, 32, 0.2);
+        }
+
+        .feature-icon {
+            font-size: 32px;
+            margin-bottom: 20px;
+            background: rgba(244, 128, 32, 0.1);
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 15px;
+            color: var(--primary);
+        }
+
+        @media (max-width: 768px) {
+            .features-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .feature-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #d1d5db;
+        }
+
+        .feature-desc {
+            color: #9ca3af;
+            font-size: 14px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="hero">
+        <div class="hero-content">
+            <h1>🤖 Digital Lab</h1>
+            <p>AI-Powered Calling Agent Platform</p>
+            <p style="font-size: 18px; margin-bottom: 50px;">Transform your customer service with intelligent AI agents
+                that actually convert</p>
+
+            <div class="cta-buttons">
+                <button class="btn" onclick="window.location.href='/signup'"
+                    style="padding: 18px 45px; font-size: 18px; border-radius: 50px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; box-shadow: 0 10px 30px rgba(244, 128, 32, 0.4);">
+                    Get Started Free
+                </button>
+                <button class="btn-secondary" onclick="window.location.href='/login'"
+                    style="padding: 18px 45px; font-size: 18px; border-radius: 50px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700;">
+                    Sign In
+                </button>
+            </div>
+
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <div class="feature-title">Lightning Fast</div>
+                    <div class="feature-desc">Powered by Groq AI for sub-second responses that feel completely natural
+                        and human-like.</div>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <div class="feature-title">Conversion Genius</div>
+                    <div class="feature-desc">Trained on thousands of sales calls to handle objections and book
+                        appointments.</div>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🎨</div>
+                    <div class="feature-title">Fully Customizable</div>
+                    <div class="feature-desc">Design your agent's personality, services, and voice to match your brand
+                        identity perfectly.</div>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🌍</div>
+                    <div class="feature-title">24/7 Global Availability</div>
+                    <div class="feature-desc">Never miss a lead. Your agent works around the clock, handling calls from
+                        anywhere in the world.</div>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <div class="feature-title">Real-time Analytics</div>
+                    <div class="feature-desc">Live dashboard showing call duration, sentiment analysis, and conversion
+                        success rates.</div>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🔒</div>
+                    <div class="feature-title">Enterprise Security</div>
+                    <div class="feature-desc">Bank-grade encryption and secure authentication to keep your business data
+                        safe.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
