@@ -238,7 +238,8 @@ async function endCall() {
 
         const response = await fetch('/api/end_call', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversation_id: currentCallId })  // Pass conversation_id
         });
 
         const data = await response.json();
@@ -311,7 +312,10 @@ async function sendMessage() {
         const response = await fetch('/api/send_message', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: message })
+            body: JSON.stringify({
+                conversation_id: currentCallId,  // Pass conversation_id
+                message: message
+            })
         });
 
         const data = await response.json();

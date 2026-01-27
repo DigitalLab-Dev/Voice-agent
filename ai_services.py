@@ -5,6 +5,11 @@ Handles Groq AI, TTS, and STT services
 
 from groq import Groq
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 import io
 import base64
 from typing import Optional, List, Dict
@@ -43,6 +48,9 @@ class AIServices:
         # Initialize Groq
         self.groq_client = Groq(api_key=GROQ_API_KEY)
         self.conversation_history = []
+        
+        # Initialize system prompt (CRITICAL: must be set before get_ai_response is called)
+        self.current_system_prompt = SYSTEM_PROMPT
         
         # Demo mode settings
         self.demo_mode = False  # Disable demo mode - use real AI

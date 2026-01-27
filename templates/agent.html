@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Lab - AI Calling Agent</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <div class="logo-icon">🤖</div>
+                <h1>Digital Lab</h1>
+                <span class="status-badge" id="callStatus">Ready</span>
+            </div>
+
+            <a href="/dashboard" class="btn-secondary btn-small"
+                style="text-decoration: none; display: flex; align-items: center; gap: 5px;">
+                <span>←</span> Back to Dashboard
+            </a>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Sidebar - Voice Controls & History -->
+            <aside class="sidebar">
+                <!-- Voice Controls -->
+                <div class="control-panel">
+                    <h3>Voice Settings</h3>
+
+                    <div class="control-group">
+                        <label>Gender</label>
+                        <div class="radio-group">
+                            <label class="radio-label">
+                                <input type="radio" name="gender" value="male" checked>
+                                <span>Male</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="gender" value="female">
+                                <span>Female</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <label>
+                            Pitch <span id="pitchValue">0</span>
+                        </label>
+                        <input type="range" id="pitchSlider" min="-20" max="20" value="0" step="1">
+                    </div>
+
+                    <div class="control-group">
+                        <label>
+                            Speed <span id="speedValue">1.0x</span>
+                        </label>
+                        <input type="range" id="speedSlider" min="50" max="200" value="100" step="10">
+                    </div>
+
+                    <button class="btn-secondary" id="testVoice">Test Voice</button>
+                </div>
+
+                <!-- Call History -->
+                <div class="history-panel">
+                    <h3>Call History</h3>
+                    <div id="historyList" class="history-list">
+                        <p class="no-history">No previous calls</p>
+                    </div>
+                </div>
+
+                <!-- Statistics -->
+                <div class="stats-panel">
+                    <h3>Statistics</h3>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Calls:</span>
+                        <span id="totalCalls" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Avg Duration:</span>
+                        <span id="avgDuration" class="stat-value">0s</span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Conversation Area -->
+            <main class="conversation-area">
+                <!-- Call Controls -->
+                <div class="call-controls">
+                    <button id="startCallBtn" class="btn-primary btn-large">
+                        <span class="icon">📞</span>
+                        Start Call
+                    </button>
+                    <button id="endCallBtn" class="btn-danger btn-large" style="display: none;">
+                        <span class="icon">❌</span>
+                        End Call
+                    </button>
+                    <div id="callDuration" class="call-duration" style="display: none;">
+                        <span class="icon">⏱️</span>
+                        <span id="durationText">00:00</span>
+                    </div>
+                </div>
+
+                <!-- Conversation Display -->
+                <div id="conversationWindow" class="conversation-window">
+                    <div class="welcome-message">
+                        <h2>Welcome to Digital Lab AI Agent</h2>
+                        <p>Click "Start Call" to begin a conversation with our AI assistant</p>
+                    </div>
+                </div>
+
+                <!-- Message Input -->
+                <div id="messageInputArea" class="message-input-area" style="display: none;">
+                    <input type="text" id="messageInput" placeholder="Type your message or use voice..."
+                        autocomplete="off">
+                    <button id="sendMessageBtn" class="btn-send">
+                        <span class="icon">▶️</span>
+                        Send
+                    </button>
+                    <button id="voiceInputBtn" class="btn-voice">
+                        <span class="icon">🎙️</span>
+                    </button>
+                </div>
+
+                <!-- Summary Panel -->
+                <div id="summaryPanel" class="summary-panel" style="display: none;">
+                    <div class="summary-header">
+                        <h3>Conversation Summary</h3>
+                        <div class="summary-actions">
+                            <button id="generateSummaryBtn" class="btn-secondary btn-small">
+                                Generate Summary
+                            </button>
+                            <button id="exportBtn" class="btn-secondary btn-small">
+                                Export
+                            </button>
+                            <button id="closeSummaryBtn" class="btn-secondary btn-small">
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                    <div id="summaryContent" class="summary-content">
+                        <p class="summary-placeholder">Click "Generate Summary" to create an AI-powered summary of this
+                            conversation</p>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner"></div>
+        <p>Processing...</p>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+
+</html>

@@ -271,7 +271,8 @@
                 if (data.success) {
                     localStorage.setItem('auth_token', data.token);
                     localStorage.setItem('user', JSON.stringify(data.user));
-                    window.location.href = '/dashboard';
+                    // Use redirect_to from API response (admin -> /admin, user -> /dashboard)
+                    window.location.href = data.redirect_to || '/dashboard';
                 } else {
                     // Reset UI on error
                     form.style.opacity = '1';

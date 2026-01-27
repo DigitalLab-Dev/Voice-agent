@@ -147,7 +147,6 @@
             }
         }
 
-        /* Error message style */
         .error-message {
             background: rgba(220, 38, 38, 0.1);
             color: #ef4444;
@@ -157,6 +156,21 @@
             margin-bottom: 20px;
             display: none;
             text-align: center;
+        }
+
+        .success-message {
+            background: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 20px;
+            display: none;
+            text-align: center;
+        }
+
+        .hidden {
+            display: none !important;
         }
     </style>
 </head>
@@ -170,7 +184,9 @@
             </div>
 
             <div id="errorMsg" class="error-message"></div>
+            <div id="successMsg" class="success-message"></div>
 
+            <!-- Signup Form -->
             <form id="signupForm">
                 <div class="form-group">
                     <label>Full Name</label>
@@ -183,9 +199,9 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Password</label>
+                    <label>Password (min 8 characters)</label>
                     <input type="password" name="password" class="form-input" placeholder="Create a strong password"
-                        required minlength="6">
+                        required minlength="8">
                 </div>
 
                 <button type="submit" class="btn-submit">
@@ -194,13 +210,35 @@
                 </button>
             </form>
 
-            <div class="footer-text">
+            <!-- Email Verification Form (hidden initially) -->
+            <form id="verificationForm" class="hidden">
+                <div class="form-group">
+                    <label>Enter 6-Digit Verification Code</label>
+                    <p style="color: #9ca3af; font-size: 13px; margin-bottom: 10px;">We sent a code to your email</p>
+                    <input type="text" id="verificationCode" class="form-input" placeholder="123456" maxlength="6" required>
+                </div>
+
+                <button type="submit" class="btn-submit">
+                    <span id="verifyBtnText">Verify Email</span>
+                    <div id="verifySpinner" class="loading-spinner"></div>
+                </button>
+
+                <div class="footer-text">
+                    Didn't receive code? <a href="#" id="resendLink">Resend</a>
+                </div>
+            </form>
+
+            <div id="footerText" class="footer-text">
                 Already have an account? <a href="/login">Sign In</a>
             </div>
         </div>
     </div>
 
     <script>
+        let currentUserId = null;
+        let currentEmail = null;
+
+        // Signup Form Handler
         document.getElementById('signupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -208,15 +246,18 @@
             const btnText = document.getElementById('btnText');
             const spinner = document.getElementById('btnSpinner');
             const errorMsg = document.getElementById('errorMsg');
+            const successMsg = document.getElementById('successMsg');
 
             // Reset state
             errorMsg.style.display = 'none';
+            successMsg.style.display = 'none';
             btn.disabled = true;
             btnText.style.display = 'none';
             spinner.style.display = 'block';
 
             const formData = new FormData(e.target);
             const data = Object.fromEntries(formData.entries());
+            currentEmail = data.email;
 
             try {
                 const response = await fetch('/api/auth/signup', {
@@ -228,10 +269,20 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    // Save token and redirect
-                    localStorage.setItem('auth_token', result.token);
-                    localStorage.setItem('user', JSON.stringify(result.user));
-                    window.location.href = '/dashboard';
+                    if (result.requires_verification) {
+                        // Show verification form
+                        currentUserId = result.user_id;
+                        document.getElementById('signupForm').classList.add('hidden');
+                        document.getElementById('verificationForm').classList.remove('hidden');
+                        document.getElementById('footerText').classList.add('hidden');
+                        successMsg.textContent = result.message || 'Check your email for the verification code!';
+                        successMsg.style.display = 'block';
+                    } else {
+                        // Old flow (if email sending failed)
+                        localStorage.setItem('auth_token', result.token);
+                        localStorage.setItem('user', JSON.stringify(result.user));
+                        window.location.href = '/dashboard';
+                    }
                 } else {
                     throw new Error(result.error);
                 }
@@ -244,6 +295,80 @@
                 btn.disabled = false;
                 btnText.style.display = 'block';
                 spinner.style.display = 'none';
+            }
+        });
+
+        // Verification Form Handler
+        document.getElementById('verificationForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const btn = e.target.querySelector('.btn-submit');
+            const btnText = document.getElementById('verifyBtnText');
+            const spinner = document.getElementById('verifySpinner');
+            const errorMsg = document.getElementById('errorMsg');
+            const code = document.getElementById('verificationCode').value;
+
+            errorMsg.style.display = 'none';
+            btn.disabled = true;
+            btnText.style.display = 'none';
+            spinner.style.display = 'block';
+
+            try {
+                const response = await fetch('/api/auth/verify-email', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: currentUserId,
+                        code: code
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Auto-login
+                    localStorage.setItem('auth_token', result.token);
+                    localStorage.setItem('user', JSON.stringify(result.user));
+                    window.location.href = '/dashboard';
+                } else {
+                    throw new Error(result.error || 'Invalid code');
+                }
+            } catch (error) {
+                console.error('Verification error:', error);
+                errorMsg.textContent = error.message || 'Verification failed';
+                errorMsg.style.display = 'block';
+
+                btn.disabled = false;
+                btnText.style.display = 'block';
+                spinner.style.display = 'none';
+            }
+        });
+
+        // Resend code handler
+        document.getElementById('resendLink').addEventListener('click', async (e) => {
+            e.preventDefault();
+            const errorMsg = document.getElementById('errorMsg');
+            const successMsg = document.getElementById('successMsg');
+
+            try {
+                const response = await fetch('/api/auth/resend-verification', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: currentEmail })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    successMsg.textContent = 'New code sent! Check your email.';
+                    successMsg.style.display = 'block';
+                    errorMsg.style.display = 'none';
+                } else {
+                    throw new Error(result.error);
+                }
+            } catch (error) {
+                errorMsg.textContent = error.message || 'Failed to resend code';
+                errorMsg.style.display = 'block';
             }
         });
     </script>

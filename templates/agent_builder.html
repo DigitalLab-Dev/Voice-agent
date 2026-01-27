@@ -349,11 +349,18 @@
             const data = Object.fromEntries(formData.entries());
 
             // Show loading on button
-            submitBtn.textContent = 'Generating...';
+            submitBtn.textContent = '🚀 Generating...';
             submitBtn.disabled = true;
 
             try {
                 const token = localStorage.getItem('auth_token');
+
+                if (!token) {
+                    alert('You must be logged in to create an agent');
+                    window.location.href = '/login';
+                    return;
+                }
+
                 const response = await fetch('/api/agent/create', {
                     method: 'POST',
                     headers: {
@@ -365,17 +372,21 @@
 
                 const result = await response.json();
 
-                if (result.success) {
+                // Check for success in standardized format
+                if (result.success && result.agent_id) {
+                    // Success! Redirect to dashboard
+                    alert('Agent created successfully!');
                     window.location.href = '/dashboard';
                 } else {
-                    alert('Error: ' + result.error);
-                    submitBtn.textContent = 'Try Again';
+                    // Show error
+                    alert('Error: ' + (result.error || 'Failed to create agent'));
+                    submitBtn.textContent = '🚀 Create Agent';
                     submitBtn.disabled = false;
                 }
             } catch (error) {
                 console.error('Error:', error);
-                alert('Connection error');
-                submitBtn.textContent = 'Try Again';
+                alert('Connection error: ' + error.message);
+                submitBtn.textContent = '🚀 Create Agent';
                 submitBtn.disabled = false;
             }
         });

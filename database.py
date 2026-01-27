@@ -304,3 +304,68 @@ class ConversationDatabase:
             
         conn.close()
         return users
+
+    # ========== Helper Methods for Call State ==========
+    def update_conversation_metadata(self, conversation_id: int, metadata: Dict):
+        """Store metadata like start_time for conversations"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Create metadata table if doesn't exist
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS conversation_metadata (
+                conversation_id INTEGER PRIMARY KEY,
+                metadata TEXT NOT NULL,
+                FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Store metadata as JSON
+        metadata_json = json.dumps(metadata)
+        cursor.execute('''
+            INSERT OR REPLACE INTO conversation_metadata (conversation_id, metadata)
+            VALUES (?, ?)
+        ''', (conversation_id, metadata_json))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_conversation_metadata(self, conversation_id: int) -> Dict:
+        """Retrieve metadata for a conversation"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Create table if doesn't exist
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS conversation_metadata (
+                conversation_id INTEGER PRIMARY KEY,
+                metadata TEXT NOT NULL,
+                FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE
+            )
+        ''')
+        
+        cursor.execute(
+            "SELECT metadata FROM conversation_metadata WHERE conversation_id = ?",
+            (conversation_id,)
+        )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return json.loads(row[0])
+        return {}
+    
+    def clear_all_data(self):
+        """Clear all data from database (for testing/reset)"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Delete all data
+        cursor.execute("DELETE FROM messages")
+        cursor.execute("DELETE FROM conversations")
+        cursor.execute("DELETE FROM conversation_metadata")
+        
+        conn.commit()
+        conn.close()
+        print("✅ All conversation data cleared")
