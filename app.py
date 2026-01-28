@@ -907,13 +907,21 @@ if __name__ == '__main__':
     logger.info("Initializing admin user...")
     auth_manager.create_admin_user("syedaliturab@gmail.com", "Admin@123")
     
-    print("\n" + "="*60)
-    print("🚀 Digital Lab AI Calling Agent")
-    print("="*60)
-    print(f"\n📱 Starting server...")
-    print(f"🌐 Open your browser to: http://localhost:5001")
-    print(f"\n👤 Admin login: syedaliturab@gmail.com / Admin@123")
-    print(f"\n💡 Press Ctrl+C to stop the server\n")
+    # Get port from environment variable (Railway sets this)
+    port = int(os.getenv('PORT', 5001))
+    
+    # Check if we're in production
+    is_production = os.getenv('RAILWAY_ENVIRONMENT') or os.getenv('RENDER')
+    
+    if not is_production:
+        print("\n" + "="*60)
+        print("🚀 Digital Lab AI Calling Agent")
+        print("="*60)
+        print(f"\n📱 Starting server...")
+        print(f"🌐 Open your browser to: http://localhost:{port}")
+        print(f"\n👤 Admin login: syedaliturab@gmail.com / Admin@123")
+        print(f"\n💡 Press Ctrl+C to stop the server\n")
     
     # Run the app
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    # In production, debug should be False
+    app.run(debug=not is_production, host='0.0.0.0', port=port)
