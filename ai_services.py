@@ -14,7 +14,6 @@ import io
 import base64
 from typing import Optional, List, Dict
 import tempfile
-from demo_script import get_demo_response
 
 # Configure Groq API
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")

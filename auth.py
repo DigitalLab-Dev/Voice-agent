@@ -1,69 +1,35 @@
-"""
-Authentication System for Digital Lab AI Agent
-Handles user authentication, session management, and password security
-"""
-
-import bcrypt
+import os
 import jwt
-import sqlite3
+import bcrypt
+import random
+import string
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import request, jsonify
-import os
 
-# Secret key for JWT (in production, use environment variable)
+# JWT Configuration
 JWT_SECRET = os.getenv('JWT_SECRET', 'digital-lab-secret-key-change-in-production')
 JWT_ALGORITHM = 'HS256'
 JWT_EXP_DELTA_HOURS = 24
 
 class AuthManager:
-    """Handles all authentication operations"""
+    """Handles all authentication operations using PostgreSQL via database instance"""
     
-    def __init__(self, db_path='conversations.db'):
-        self.db_path = db_path
-        self.create_auth_tables()
+    def __init__(self, db):
+        """
+        Initialize with database instance
+        Args:
+            db: ConversationDatabase instance (uses PostgreSQL on Railway, SQLite locally)
+        """
+        self.db = db
+        # No more SQLite connections! Database tables are created by database.py
     
     def create_auth_tables(self):
-        """Create users and sessions tables"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Users table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                full_name TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                last_login DATETIME
-            )
-        ''')
-        
-        # Agents table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS agents (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                business_name TEXT,
-                industry TEXT,
-                services TEXT,
-                tone TEXT,
-                system_prompt TEXT,
-                greeting_message TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )
-        ''')
-
-        # Update conversations table to include user_id (handle if column already exists)
-        try:
-            cursor.execute('ALTER TABLE conversations ADD COLUMN user_id INTEGER')
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
-            
-        conn.close()
+        """No-op: Tables are created by database.py Base.metadata.create_all()"""
+        pass
     
     def hash_password(self, password: str) -> str:
         """Hash password using bcrypt"""
@@ -77,25 +43,14 @@ class AuthManager:
     def create_user(self, email: str, password: str, full_name: str = None) -> dict:
         """Create new user account"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
             # Check if email exists
-            cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
-            if cursor.fetchone():
-                conn.close()
+            existing_user = self.db.get_user_by_email(email)
+            if existing_user:
                 return {'success': False, 'error': 'Email already registered'}
             
             # Hash password and create user
             password_hash = self.hash_password(password)
-            cursor.execute('''
-                INSERT INTO users (email, password_hash, full_name)
-                VALUES (?, ?, ?)
-            ''', (email, password_hash, full_name))
-            
-            user_id = cursor.lastrowid
-            conn.commit()
-            conn.close()
+            user_id = self.db.create_user(email, password_hash, full_name)
             
             return {
                 'success': True,
@@ -111,34 +66,18 @@ class AuthManager:
     def authenticate_user(self, email: str, password: str) -> dict:
         """Authenticate user and return JWT token"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
             # Get user
-            cursor.execute('''
-                SELECT id, email, password_hash, full_name
-                FROM users WHERE email = ?
-            ''', (email,))
-            
-            user = cursor.fetchone()
+            user = self.db.get_user_by_email(email)
             
             if not user:
-                conn.close()
                 return {'success': False, 'error': 'Invalid email or password'}
             
             # Verify password
             if not self.verify_password(password, user['password_hash']):
-                conn.close()
                 return {'success': False, 'error': 'Invalid email or password'}
             
             # Update last login
-            cursor.execute('''
-                UPDATE users SET last_login = CURRENT_TIMESTAMP
-                WHERE id = ?
-            ''', (user['id'],))
-            conn.commit()
-            conn.close()
+            self.db.update_user_last_login(user['id'])
             
             # Generate JWT token
             token = self.create_token(user['id'], user['email'])
@@ -164,7 +103,7 @@ class AuthManager:
             return {'success': False, 'error': str(e)}
     
     def create_token(self, user_id: int, email: str) -> str:
-        """Create JWT token"""
+        """Generate JWT token for user"""
         payload = {
             'user_id': user_id,
             'email': email,
@@ -176,447 +115,93 @@ class AuthManager:
         """Verify JWT token and return user data"""
         try:
             payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-            return {'success': True, 'user_id': payload['user_id'], 'email': payload['email']}
+            return {
+                'valid': True,
+                'user_id': payload['user_id'],
+                'email': payload['email']
+            }
         except jwt.ExpiredSignatureError:
-            return {'success': False, 'error': 'Token expired'}
+            return {'valid': False, 'error': 'Token expired'}
         except jwt.InvalidTokenError:
-            return {'success': False, 'error': 'Invalid token'}
+            return {'valid': False, 'error': 'Invalid token'}
     
-    def get_user(self, user_id: int) -> dict:
-        """Get user by ID"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                SELECT id, email, full_name, created_at, last_login
-                FROM users WHERE id = ?
-            ''', (user_id,))
-            
-            user = cursor.fetchone()
-            conn.close()
-            
-            if user:
-                return dict(user)
-            return None
-            
-        except Exception as e:
-            print(f"Error getting user: {e}")
-            return None
-
-    def get_agent(self, agent_id: int) -> dict:
-        """Get specific agent configuration"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            cursor.execute('SELECT * FROM agents WHERE id = ?', (agent_id,))
-            agent = cursor.fetchone()
-            conn.close()
-            
-            if agent:
-                return dict(agent)
-            return None
-        except Exception as e:
-            print(f"Error getting agent: {e}")
-            return None
-
-    def get_user_agents(self, user_id: int) -> list:
+    def get_user_id_from_email(self, email: str):
+        """Get user ID from email"""
+        user = self.db.get_user_by_email(email)
+        return user['id'] if user else None
+    
+    def get_user_agents(self, user_id: int):
         """Get all agents for a user"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            cursor.execute('SELECT * FROM agents WHERE user_id = ? ORDER BY id DESC', (user_id,))
-            agents = cursor.fetchall()
-            conn.close()
-            
-            return [dict(agent) for agent in agents]
-        except Exception as e:
-            print(f"Error getting user agents: {e}")
-            return []
-
-    def create_agent(self, user_id: int, agent_data: dict) -> bool:
-        """Create a new agent for user"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                INSERT INTO agents (user_id, business_name, industry, services, tone, system_prompt, greeting_message)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                user_id,
-                agent_data['business_name'],
-                agent_data['industry'],
-                agent_data['services'],
-                agent_data['tone'],
-                agent_data['system_prompt'],
-                agent_data['greeting_message']
-            ))
-            
-            agent_id = cursor.lastrowid
-            conn.commit()
-            conn.close()
-            return agent_id
-        except Exception as e:
-            print(f"Error creating agent: {e}")
-            return None
-
-    def update_agent(self, agent_id: int, user_id: int, agent_data: dict) -> bool:
-        """Update existing agent"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                UPDATE agents 
-                SET business_name=?, industry=?, services=?, tone=?, system_prompt=?, greeting_message=?
-                WHERE id=? AND user_id=?
-            ''', (
-                agent_data['business_name'],
-                agent_data['industry'],
-                agent_data['services'],
-                agent_data['tone'],
-                agent_data['system_prompt'],
-                agent_data['greeting_message'],
-                agent_id,
-                user_id
-            ))
-            
-            conn.commit()
-            conn.close()
-            return True
-        except Exception as e:
-            print(f"Error updating agent: {e})")
+        return self.db.get_user_agents(user_id)
+    
+    def create_agent(self, user_id: int, name: str, **kwargs):
+        """Create a new agent"""
+        return self.db.create_agent(user_id, name, **kwargs)
+    
+    def get_agent(self, agent_id: int):
+        """Get agent by ID"""
+        return self.db.get_agent(agent_id)
+    
+    def update_agent(self, agent_id: int, **kwargs):
+        """Update agent"""
+        return self.db.update_agent(agent_id, **kwargs)
+    
+    def delete_agent(self, agent_id: int):
+        """Delete agent"""
+        return self.db.delete_agent(agent_id)
+    
+    def create_verification_code(self, email: str) -> str:
+        """Create verification code and return it"""
+        code = ''.join(random.choices(string.digits, k=6))
+        expires_at = datetime.utcnow() + timedelta(hours=24)
+        self.db.create_verification_code(email, code, expires_at)
+        return code
+    
+    def verify_code(self, email: str, code: str) -> bool:
+        """Verify verification code"""
+        vc = self.db.get_verification_code(email, code)
+        if not vc:
             return False
-    
-    def delete_agent(self, agent_id: int) -> dict:
-        """Delete an agent"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute('DELETE FROM agents WHERE id = ?', (agent_id,))
-            
-            conn.commit()
-            conn.close()
-            return {'success': True}
-        except Exception as e:
-            print(f"Error deleting agent: {e}")
-            return {'success': False, 'error': str(e)}
-
-    # ========== Email Verification Methods ==========
-    def send_verification_email(self, user_id: int, email: str) -> dict:
-        """Send 6-digit verification code via email"""
-        import random
         
-        try:
-            # Generate 6-digit code
-            code = str(random.randint(100000, 999999))
-            
-            # Store in database
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Create verification table if doesn't exist
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS email_verifications (
-                    user_id INTEGER PRIMARY KEY,
-                    code TEXT NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users(id)
-                )
-            ''')
-            
-            # Insert or replace code
-            cursor.execute('''
-                INSERT OR REPLACE INTO email_verifications (user_id, code)
-                VALUES (?, ?)
-            ''', (user_id, code))
-            
-            conn.commit()
-            conn.close()
-            
-            # Try to send email (with fallback)
-            email_sent = self._send_email(
-                to_email=email,
-                subject="Verify Your Email - Digital Lab",
-                body=f"Your verification code is: {code}\n\nThis code will expire in 1 hour."
-            )
-            
-            if not email_sent:
-                # Fallback: Just log the code (for development)
-                print(f"⚠️ Email not sent. Verification code for {email}: {code}")
-            
-            return {'success': True, 'code': code}  # Return code for dev purposes
-            
-        except Exception as e:
-            print(f"Error sending verification email: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def verify_email_code(self, user_id: int, code: str) -> dict:
-        """Verify email code"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                SELECT code FROM email_verifications 
-                WHERE user_id = ? AND datetime(created_at, '+1 hour') > datetime('now')
-            ''', (user_id,))
-            
-            result = cursor.fetchone()
-            conn.close()
-            
-            if not result:
-                return {'success': False, 'error': 'Code expired or not found'}
-            
-            if result[0] != code:
-                return {'success': False, 'error': 'Invalid code'}
-            
-            # Mark user as verified (you could add a verified column to users table)
-            
-            return {'success': True}
-            
-        except Exception as e:
-            print(f"Error verifying code: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def resend_verification_email(self, email: str) -> dict:
-        """Resend verification email"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
-            user = cursor.fetchone()
-            conn.close()
-            
-            if not user:
-                # Don't reveal if email exists for security
-                return {'success': True}
-            
-            return self.send_verification_email(user[0], email)
-            
-        except Exception as e:
-            print(f"Error resending verification: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    # ========== Pre-Signup Email Verification (NEW) ==========
-    def send_pre_signup_verification(self, email: str) -> dict:
-        """Send verification code to email BEFORE creating account"""
-        import random
+        # Check if expired
+        expires_at = datetime.fromisoformat(vc['expires_at'])
+        if datetime.utcnow() > expires_at:
+            self.db.delete_verification_code(email, code)
+            return False
         
+        # Mark user as verified
+        self.db.verify_user(email)
+        self.db.delete_verification_code(email, code)
+        return True
+    
+    def send_verification_email(self, email: str, code: str) -> bool:
+        """Send verification code via email"""
         try:
-            # Check if email already registered
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
-            if cursor.fetchone():
-                conn.close()
-                return {'success': False, 'error': 'Email already registered'}
-            
-            # Generate 6-digit code
-            code = str(random.randint(100000, 999999))
-            
-            # Create pre_signup_verifications table if doesn't exist
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS pre_signup_verifications (
-                    email TEXT PRIMARY KEY,
-                    code TEXT NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # Insert or replace code
-            cursor.execute('''
-                INSERT OR REPLACE INTO pre_signup_verifications (email, code)
-                VALUES (?, ?)
-            ''', (email, code))
-            
-            conn.commit()
-            conn.close()
-            
-            # Try to send email
-            email_sent = self._send_email(
-                to_email=email,
-                subject="Verify Your Email - Digital Lab",
-                body=f"Your verification code is: {code}\n\nThis code will expire in 10 minutes."
-            )
-            
-            if not email_sent:
-                print(f"⚠️ Email not sent. Verification code for {email}: {code}")
-            
-            return {'success': True, 'code': code}  # Return code for dev purposes
-            
-        except Exception as e:
-            print(f"Error sending pre-signup verification: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def verify_pre_signup_code(self, email: str, code: str) -> dict:
-        """Verify pre-signup email code"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Check code validity (10 minute expiry)
-            cursor.execute('''
-                SELECT code FROM pre_signup_verifications 
-                WHERE email = ? AND datetime(created_at, '+10 minutes') > datetime('now')
-            ''', (email,))
-            
-            result = cursor.fetchone()
-            
-            if not result:
-                conn.close()
-                return {'success': False, 'error': 'Code expired or not found'}
-            
-            if result[0] != code:
-                conn.close()
-                return {'success': False, 'error': 'Invalid code'}
-            
-            # Code is valid - delete it to prevent reuse
-            cursor.execute('DELETE FROM pre_signup_verifications WHERE email = ?', (email,))
-            conn.commit()
-            conn.close()
-            
-            return {'success': True}
-            
-        except Exception as e:
-            print(f"Error verifying pre-signup code: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def resend_pre_signup_code(self, email: str) -> dict:
-        """Resend pre-signup verification code"""
-        return self.send_pre_signup_verification(email)
-    
-    
-    # ========== Password Reset Methods ==========
-    def send_password_reset_email(self, email: str) -> dict:
-        """Send password reset code"""
-        import random
-        
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
-            user = cursor.fetchone()
-            
-            if not user:
-                # Don't reveal if email exists
-                return {'success': True}
-            
-            user_id = user[0]
-            
-            # Generate 6-digit code
-            code = str(random.randint(100000, 999999))
-            
-            # Create reset table if doesn't exist
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS password_resets (
-                    user_id INTEGER PRIMARY KEY,
-                    code TEXT NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users(id)
-                )
-            ''')
-            
-            # Insert or replace code
-            cursor.execute('''
-                INSERT OR REPLACE INTO password_resets (user_id, code)
-                VALUES (?, ?)
-            ''', (user_id, code))
-            
-            conn.commit()
-            conn.close()
-            
-            # Send email
-            email_sent = self._send_email(
-                to_email=email,
-                subject="Password Reset Code - Digital Lab",
-                body=f"Your password reset code is: {code}\n\nThis code will expire in 1 hour."
-            )
-            
-            if not email_sent:
-                print(f"⚠️ Email not sent. Reset code for {email}: {code}")
-            
-            return {'success': True}
-            
-        except Exception as e:
-            print(f"Error sending reset email: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def reset_password_with_code(self, email: str, code: str, new_password: str) -> dict:
-        """Reset password using code"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Get user ID
-            cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
-            user = cursor.fetchone()
-            
-            if not user:
-                conn.close()
-                return {'success': False, 'error': 'Invalid email or code'}
-            
-            user_id = user[0]
-            
-            # Verify code
-            cursor.execute('''
-                SELECT code FROM password_resets 
-                WHERE user_id = ? AND datetime(created_at, '+1 hour') > datetime('now')
-            ''', (user_id,))
-            
-            result = cursor.fetchone()
-            
-            if not result or result[0] != code:
-                conn.close()
-                return {'success': False, 'error': 'Invalid or expired code'}
-            
-            # Update password
-            password_hash = self.hash_password(new_password)
-            cursor.execute('UPDATE users SET password_hash = ? WHERE id = ?', (password_hash, user_id))
-            
-            # Delete used code
-            cursor.execute('DELETE FROM password_resets WHERE user_id = ?', (user_id,))
-            
-            conn.commit()
-            conn.close()
-            
-            return {'success': True}
-            
-        except Exception as e:
-            print(f"Error resetting password: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def _send_email(self, to_email: str, subject: str, body: str) -> bool:
-        """Send email using SMTP (with fallback to console)"""
-        try:
-            import smtplib
-            from email.mime.text import MIMEText
-            from email.mime.multipart import MIMEMultipart
-            
-            smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
+            smtp_host = os.getenv('SMTP_HOST')
             smtp_port = int(os.getenv('SMTP_PORT', 587))
             smtp_user = os.getenv('SMTP_USER')
             smtp_password = os.getenv('SMTP_PASSWORD')
             
-            if not smtp_user or not smtp_password:
-                print("⚠️ SMTP credentials not configured in .env")
+            if not all([smtp_host, smtp_user, smtp_password]):
+                print("SMTP not configured - skipping email")
                 return False
             
             msg = MIMEMultipart()
             msg['From'] = smtp_user
-            msg['To'] = to_email
-            msg['Subject'] = subject
-            msg.attach(MIMEText(body, 'plain'))
+            msg['To'] = email
+            msg['Subject'] = 'Digital Lab - Verification Code'
+            
+            body = f"""
+            <html>
+            <body>
+                <h2>Welcome to Digital Lab!</h2>
+                <p>Your verification code is: <strong>{code}</strong></p>
+                <p>This code will expire in 24 hours.</p>
+            </body>
+            </html>
+            """
+            
+            msg.attach(MIMEText(body, 'html'))
             
             server = smtplib.SMTP(smtp_host, smtp_port)
             server.starttls()
@@ -624,75 +209,48 @@ class AuthManager:
             server.send_message(msg)
             server.quit()
             
-            print(f"✅ Email sent to {to_email}")
             return True
             
         except Exception as e:
-            print(f"❌ Email sending failed: {e}")
+            print(f"Error sending email: {e}")
             return False
-    
-    def clear_all_users_and_agents(self):
-        """Clear all users and agents (for testing/reset)"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("DELETE FROM agents")
-        cursor.execute("DELETE FROM users")
-        cursor.execute("DELETE FROM email_verifications")
-        cursor.execute("DELETE FROM password_resets")
-        
-        conn.commit()
-        conn.close()
-        print("✅ All user and agent data cleared")
     
     def create_admin_user(self, email: str, password: str):
         """Create admin user if doesn't exist"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Check if admin exists
-            cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
-            if cursor.fetchone():
-                conn.close()
-                print(f"ℹ️  Admin user {email} already exists")
-                return
-            
-            # Create admin
-            password_hash = self.hash_password(password)
-            cursor.execute('''
-                INSERT INTO users (email, password_hash, full_name)
-                VALUES (?, ?, ?)
-            ''', (email, password_hash, 'Digital Lab Admin'))
+        existing = self.db.get_user_by_email(email)
+        if existing:
+            print(f"ℹ️  Admin user {email} already exists")
+            return existing
+        
+        password_hash = self.hash_password(password)
+        user_id = self.db.create_user(email, password_hash, "System Admin")
+        self.db.verify_user(email)
+        print(f"✅ Created admin user: {email}")
+        return {'id': user_id, 'email': email}
 
-            
-            conn.commit()
-            conn.close()
-            print(f"✅ Admin user created: {email}")
-            
-        except Exception as e:
-            print(f"Error creating admin: {e}")
-
-# Create global instance
-auth_manager = AuthManager()
 
 def require_auth(f):
     """Decorator to require authentication for routes"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        token = request.headers.get('Authorization')
+        token = None
+        
+        # Get token from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
         
         if not token:
-            return jsonify({'error': 'No token provided'}), 401
+            return jsonify({"error": "No token provided"}), 401
         
-        # Remove 'Bearer ' prefix if present
-        if token.startswith('Bearer '):
-            token = token[7:]
+        # Import here to avoid circular dependency
+        from app import auth_manager
         
+        # Verify token
         result = auth_manager.verify_token(token)
         
-        if not result['success']:
-            return jsonify({'error': result['error']}), 401
+        if not result['valid']:
+            return jsonify({"error": result.get('error', 'Invalid token')}), 401
         
         # Add user info to request
         request.current_user = result

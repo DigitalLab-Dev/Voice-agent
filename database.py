@@ -57,6 +57,47 @@ class ConversationMetadata(Base):
     data = Column(Text, nullable=False)  # JSON string (renamed from 'metadata' to avoid SQLAlchemy conflict)
 
 
+class User(Base):
+    """User authentication model"""
+    __tablename__ = 'users'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    full_name = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_login = Column(DateTime)
+    is_verified = Column(Integer, default=0)
+
+
+class Agent(Base):
+    """AI Agent model"""
+    __tablename__ = 'agents'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    name = Column(String(255), nullable=False)
+    business_name = Column(String(255))
+    industry = Column(String(100))
+    services = Column(Text)
+    voice = Column(String(50), default='alloy')
+    personality = Column(Text)
+    system_prompt = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class VerificationCode(Base):
+    """Email verification codes"""
+    __tablename__ = 'verification_codes'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), nullable=False, index=True)
+    code = Column(String(10), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+
 # ========== Database Manager ==========
 
 class ConversationDatabase:
@@ -344,5 +385,291 @@ class ConversationDatabase:
             if metadata:
                 return json.loads(metadata.data)
             return {}
+        finally:
+            session.close()
+    
+    # ========== Auth Management Methods ==========
+    
+    def create_user(self, email: str, password_hash: str, full_name: str = None) -> int:
+        """Create a new user"""
+        session = self.Session()
+        try:
+            user = User(
+                email=email,
+                password_hash=password_hash,
+                full_name=full_name,
+                is_verified=0
+            )
+            session.add(user)
+            session.commit()
+            return user.id
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error creating user: {e}")
+            raise
+        finally:
+            session.close()
+    
+    def get_user_by_email(self, email: str) -> Optional[Dict]:
+        """Get user by email"""
+        session = self.Session()
+        try:
+            user = session.query(User).filter_by(email=email).first()
+            if user:
+                return {
+                    'id': user.id,
+                    'email': user.email,
+                    'password_hash': user.password_hash,
+                    'full_name': user.full_name,
+                    'created_at': user.created_at.isoformat() if user.created_at else None,
+                    'last_login': user.last_login.isoformat() if user.last_login else None,
+                    'is_verified': user.is_verified
+                }
+            return None
+        finally:
+            session.close()
+    
+    def get_user_by_id(self, user_id: int) -> Optional[Dict]:
+        """Get user by ID"""
+        session = self.Session()
+        try:
+            user = session.query(User).filter_by(id=user_id).first()
+            if user:
+                return {
+                    'id': user.id,
+                    'email': user.email,
+                    'password_hash': user.password_hash,
+                    'full_name': user.full_name,
+                    'created_at': user.created_at.isoformat() if user.created_at else None,
+                    'last_login': user.last_login.isoformat() if user.last_login else None,
+                    'is_verified': user.is_verified
+                }
+            return None
+        finally:
+            session.close()
+    
+    def update_user_last_login(self, user_id: int):
+        """Update user's last login timestamp"""
+        session = self.Session()
+        try:
+            user = session.query(User).filter_by(id=user_id).first()
+            if user:
+                user.last_login = datetime.utcnow()
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error updating last login: {e}")
+        finally:
+            session.close()
+    
+    def verify_user(self, email: str):
+        """Mark user as verified"""
+        session = self.Session()
+        try:
+            user = session.query(User).filter_by(email=email).first()
+            if user:
+                user.is_verified = 1
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error verifying user: {e}")
+        finally:
+            session.close()
+    
+    def count_users(self) -> int:
+        """Get total user count"""
+        session = self.Session()
+        try:
+            return session.query(User).count()
+        finally:
+            session.close()
+    
+    def get_all_users_with_agents(self) -> List[Dict]:
+        """Get all users with their agent count"""
+        session = self.Session()
+        try:
+            from sqlalchemy import func
+            results = session.query(
+                User.id,
+                User.email,
+                User.full_name,
+                User.created_at,
+                func.count(Agent.id).label('agent_count')
+            ).outerjoin(Agent, User.id == Agent.user_id)\
+             .group_by(User.id, User.email, User.full_name, User.created_at)\
+             .order_by(User.created_at.desc())\
+             .all()
+            
+            users = []
+            for row in results:
+                users.append({
+                    'id': row.id,
+                    'email': row.email,
+                    'full_name': row.full_name,
+                    'created_at': row.created_at.isoformat() if row.created_at else None,
+                    'agent_count': row.agent_count
+                })
+            return users
+        finally:
+            session.close()
+    
+    # Agent methods
+    def create_agent(self, user_id: int, name: str, **kwargs) -> int:
+        """Create a new agent"""
+        session = self.Session()
+        try:
+            agent = Agent(
+                user_id=user_id,
+                name=name,
+                business_name=kwargs.get('business_name'),
+                industry=kwargs.get('industry'),
+                services=kwargs.get('services'),
+                voice=kwargs.get('voice', 'alloy'),
+                personality=kwargs.get('personality'),
+                system_prompt=kwargs.get('system_prompt')
+            )
+            session.add(agent)
+            session.commit()
+            return agent.id
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error creating agent: {e}")
+            raise
+        finally:
+            session.close()
+    
+    def get_agent(self, agent_id: int) -> Optional[Dict]:
+        """Get agent by ID"""
+        session = self.Session()
+        try:
+            agent = session.query(Agent).filter_by(id=agent_id).first()
+            if agent:
+                return {
+                    'id': agent.id,
+                    'user_id': agent.user_id,
+                    'name': agent.name,
+                    'business_name': agent.business_name,
+                    'industry': agent.industry,
+                    'services': agent.services,
+                    'voice': agent.voice,
+                    'personality': agent.personality,
+                    'system_prompt': agent.system_prompt,
+                    'created_at': agent.created_at.isoformat() if agent.created_at else None
+                }
+            return None
+        finally:
+            session.close()
+    
+    def get_user_agents(self, user_id: int) -> List[Dict]:
+        """Get all agents for a user"""
+        session = self.Session()
+        try:
+            agents = session.query(Agent).filter_by(user_id=user_id).all()
+            return [{
+                'id': a.id,
+                'user_id': a.user_id,
+                'name': a.name,
+                'business_name': a.business_name,
+                'industry': a.industry,
+                'services': a.services,
+                'voice': a.voice,
+                'personality': a.personality,
+                'system_prompt': a.system_prompt,
+                'created_at': a.created_at.isoformat() if a.created_at else None
+            } for a in agents]
+        finally:
+            session.close()
+    
+    def update_agent(self, agent_id: int, **kwargs):
+        """Update agent details"""
+        session = self.Session()
+        try:
+            agent = session.query(Agent).filter_by(id=agent_id).first()
+            if agent:
+                for key, value in kwargs.items():
+                    if hasattr(agent, key):
+                        setattr(agent, key, value)
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error updating agent: {e}")
+        finally:
+            session.close()
+    
+    def delete_agent(self, agent_id: int):
+        """Delete an agent"""
+        session = self.Session()
+        try:
+            agent = session.query(Agent).filter_by(id=agent_id).first()
+            if agent:
+                session.delete(agent)
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error deleting agent: {e}")
+        finally:
+            session.close()
+    
+    def count_agents(self) -> int:
+        """Get total agent count"""
+        session = self.Session()
+        try:
+            return session.query(Agent).count()
+        finally:
+            session.close()
+    
+    # Verification code methods
+    def create_verification_code(self, email: str, code: str, expires_at: datetime) -> int:
+        """Create a verification code"""
+        session = self.Session()
+        try:
+            vc = VerificationCode(
+                email=email,
+                code=code,
+                expires_at=expires_at
+            )
+            session.add(vc)
+            session.commit()
+            return vc.id
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error creating verification code: {e}")
+            raise
+        finally:
+            session.close()
+    
+    def get_verification_code(self, email: str, code: str) -> Optional[Dict]:
+        """Get verification code"""
+        session = self.Session()
+        try:
+            vc = session.query(VerificationCode).filter_by(
+                email=email,
+                code=code
+            ).first()
+            
+            if vc:
+                return {
+                    'id': vc.id,
+                    'email': vc.email,
+                    'code': vc.code,
+                    'expires_at': vc.expires_at.isoformat() if vc.expires_at else None,
+                    'created_at': vc.created_at.isoformat() if vc.created_at else None
+                }
+            return None
+        finally:
+            session.close()
+    
+    def delete_verification_code(self, email: str, code: str):
+        """Delete a verification code"""
+        session = self.Session()
+        try:
+            session.query(VerificationCode).filter_by(
+                email=email,
+                code=code
+            ).delete()
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error deleting verification code: {e}")
         finally:
             session.close()
