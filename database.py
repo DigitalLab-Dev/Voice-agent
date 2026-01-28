@@ -1,371 +1,348 @@
 """
 Database Manager for Digital Lab AI Agent
-Handles conversation history storage and retrieval
+Supports both SQLite (local dev) and PostgreSQL (production)
+Uses SQLAlchemy ORM for database abstraction
 """
 
-import sqlite3
-import json
+import os
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, func
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship, scoped_session
 from datetime import datetime
 from typing import List, Dict, Optional
-import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+Base = declarative_base()
+
+# ========== SQLAlchemy Models ==========
+
+class Conversation(Base):
+    """Conversation model"""
+    __tablename__ = 'conversations'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    agent_id = Column(Integer, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    duration = Column(Integer, nullable=True)
+    message_count = Column(Integer, default=0)
+    summary = Column(Text, nullable=True)
+    sentiment = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationship to messages
+    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+
+
+class Message(Base):
+    """Message model"""
+    __tablename__ = 'messages'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(Integer, ForeignKey('conversations.id', ondelete='CASCADE'), nullable=False)
+    role = Column(String(50), nullable=False)
+    content = Column(Text, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Relationship to conversation
+    conversation = relationship("Conversation", back_populates="messages")
+
+
+class ConversationMetadata(Base):
+    """Conversation metadata model for storing call state and custom data"""
+    __tablename__ = 'conversation_metadata'
+    
+    conversation_id = Column(Integer, ForeignKey('conversations.id', ondelete='CASCADE'), primary_key=True)
+    data = Column(Text, nullable=False)  # JSON string (renamed from 'metadata' to avoid SQLAlchemy conflict)
+
+
+# ========== Database Manager ==========
 
 class ConversationDatabase:
-    """Manages SQLite database for conversation history"""
+    """Manages database for conversation history - supports SQLite and PostgreSQL"""
     
-    def __init__(self, db_path: str = "conversations.db"):
-        """Initialize database connection"""
-        self.db_path = db_path
+    def __init__(self, db_url: str = None):
+        """
+        Initialize database connection
+        
+        Args:
+            db_url: Database URL. If None, uses environment variable DATABASE_URL (Railway)
+                   or defaults to SQLite
+        """
+        if db_url is None:
+            # Check for Railway PostgreSQL
+            db_url = os.getenv('DATABASE_URL')
+            
+            # Railway provides postgres:// but SQLAlchemy needs postgresql://
+            if db_url and db_url.startswith('postgres://'):
+                db_url = db_url.replace('postgres://', 'postgresql://', 1)
+            
+            # Fallback to SQLite for local development
+            if not db_url:
+                db_path = os.path.join(os.path.dirname(__file__), 'conversations.db')
+                db_url = f'sqlite:///{db_path}'
+        
+        logger.info(f"Initializing database with URL: {db_url.split('@')[0]}...")  # Hide credentials
+        
+        # Create engine
+        if 'sqlite' in db_url:
+            # SQLite-specific settings
+            self.engine = create_engine(db_url, connect_args={'check_same_thread': False})
+        else:
+            # PostgreSQL settings
+            self.engine = create_engine(
+                db_url,
+                pool_size=10,
+                max_overflow=20,
+                pool_pre_ping=True,  # Verify connections before using
+                pool_recycle=300  # Recycle connections after 5 minutes
+            )
+        
+        # Create scoped session
+        session_factory = sessionmaker(bind=self.engine)
+        self.Session = scoped_session(session_factory)
+        
+        # Initialize database
         self.init_database()
     
     def init_database(self):
         """Create tables if they don't exist"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Conversations table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS conversations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                agent_id INTEGER,
-                timestamp TEXT NOT NULL,
-                duration INTEGER,
-                message_count INTEGER,
-                summary TEXT,
-                sentiment TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-
-        # Messages table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id INTEGER,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE
-            )
-        ''')
-        
-        # Migration: Add agent_id to existing table if missing
         try:
-            cursor.execute('ALTER TABLE conversations ADD COLUMN agent_id INTEGER')
-        except sqlite3.OperationalError:
-            pass # Column exists
-            
-        conn.commit()
-        conn.close()
+            Base.metadata.create_all(self.engine)
+            logger.info("Database tables initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing database: {e}")
+            raise
     
     def create_conversation(self, agent_id: int = None) -> int:
         """Create a new conversation and return its ID"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute(
-            "INSERT INTO conversations (agent_id, timestamp, message_count) VALUES (?, ?, ?)",
-            (agent_id, timestamp, 0)
-        )
-        
-        conversation_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        
-        return conversation_id
+        session = self.Session()
+        try:
+            conversation = Conversation(
+                agent_id=agent_id,
+                timestamp=datetime.now(),
+                message_count=0
+            )
+            session.add(conversation)
+            session.commit()
+            conversation_id = conversation.id
+            return conversation_id
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error creating conversation: {e}")
+            raise
+        finally:
+            session.close()
     
     def add_message(self, conversation_id: int, role: str, content: str):
         """Add a message to a conversation"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute(
-            "INSERT INTO messages (conversation_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
-            (conversation_id, role, content, timestamp)
-        )
-        
-        # Update message count
-        cursor.execute(
-            "UPDATE conversations SET message_count = message_count + 1 WHERE id = ?",
-            (conversation_id,)
-        )
-        
-        conn.commit()
-        conn.close()
+        session = self.Session()
+        try:
+            message = Message(
+                conversation_id=conversation_id,
+                role=role,
+                content=content,
+                timestamp=datetime.now()
+            )
+            session.add(message)
+            
+            # Update message count
+            conversation = session.query(Conversation).filter_by(id=conversation_id).first()
+            if conversation:
+                conversation.message_count += 1
+            
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error adding message: {e}")
+            raise
+        finally:
+            session.close()
     
     def update_conversation(self, conversation_id: int, duration: int = None, 
                           summary: str = None, sentiment: str = None):
         """Update conversation metadata"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        updates = []
-        params = []
-        
-        if duration is not None:
-            updates.append("duration = ?")
-            params.append(duration)
-        
-        if summary is not None:
-            updates.append("summary = ?")
-            params.append(summary)
-        
-        if sentiment is not None:
-            updates.append("sentiment = ?")
-            params.append(sentiment)
-        
-        if updates:
-            params.append(conversation_id)
-            query = f"UPDATE conversations SET {', '.join(updates)} WHERE id = ?"
-            cursor.execute(query, params)
-        
-        conn.commit()
-        conn.close()
+        session = self.Session()
+        try:
+            conversation = session.query(Conversation).filter_by(id=conversation_id).first()
+            if conversation:
+                if duration is not None:
+                    conversation.duration = duration
+                if summary is not None:
+                    conversation.summary = summary
+                if sentiment is not None:
+                    conversation.sentiment = sentiment
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error updating conversation: {e}")
+            raise
+        finally:
+            session.close()
     
     def get_conversation(self, conversation_id: int) -> Optional[Dict]:
-        """Get a specific conversation with all messages"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # Get conversation metadata
-        cursor.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,))
-        conv_row = cursor.fetchone()
-        
-        if not conv_row:
-            conn.close()
-            return None
-        
-        conversation = dict(conv_row)
-        
-        # Get all messages
-        cursor.execute(
-            "SELECT * FROM messages WHERE conversation_id = ? ORDER BY timestamp ASC",
-            (conversation_id,)
-        )
-        
-        messages = [dict(row) for row in cursor.fetchall()]
-        conversation['messages'] = messages
-        
-        conn.close()
-        return conversation
-    
-    def get_all_conversations(self, agent_id: int = None, user_id: int = None) -> List[Dict]:
-        """Get list of conversations, filtered by agent or user"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        where_clause = ""
-        params = []
-        
-        if agent_id:
-            where_clause = "WHERE agent_id = ?"
-            params.append(agent_id)
-        elif user_id:
-            where_clause = "WHERE agent_id IN (SELECT id FROM agents WHERE user_id = ?)"
-            params.append(user_id)
-            
-        cursor.execute(f"""
-            SELECT id, agent_id, timestamp, duration, message_count, summary, sentiment
-            FROM conversations 
-            {where_clause}
-            ORDER BY created_at DESC
-        """, params)
-        
-        conversations = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-        
-        return conversations
-    
-    def delete_conversation(self, conversation_id: int) -> bool:
-        """Delete a conversation and all its messages"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
+        """Get a conversation by ID"""
+        session = self.Session()
         try:
-            cursor.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
-            cursor.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
-            conn.commit()
-            conn.close()
-            return True
-        except Exception as e:
-            conn.close()
-            print(f"Error deleting conversation: {e}")
-            return False
+            conversation = session.query(Conversation).filter_by(id=conversation_id).first()
+            if conversation:
+                return {
+                    'id': conversation.id,
+                    'agent_id': conversation.agent_id,
+                    'timestamp': conversation.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                    'duration': conversation.duration,
+                    'message_count': conversation.message_count,
+                    'summary': conversation.summary,
+                    'sentiment': conversation.sentiment
+                }
+            return None
+        finally:
+            session.close()
     
-    def get_statistics(self, agent_id: int = None, user_id: int = None) -> Dict:
-        """Get statistics, filtered by agent or user"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        where_clause = ""
-        params = []
-        
-        if agent_id:
-            where_clause = "WHERE agent_id = ?"
-            params.append(agent_id)
-        elif user_id:
-            # Join with agents table to filter by user
-            where_clause = "WHERE agent_id IN (SELECT id FROM agents WHERE user_id = ?)"
-            params.append(user_id)
+    def get_messages(self, conversation_id: int) -> List[Dict]:
+        """Get all messages for a conversation"""
+        session = self.Session()
+        try:
+            messages = session.query(Message).filter_by(
+                conversation_id=conversation_id
+            ).order_by(Message.timestamp).all()
             
-        cursor.execute(f"SELECT COUNT(*) FROM conversations {where_clause}", params)
-        total_calls = cursor.fetchone()[0]
-        
-        # Determine correct WHERE clause for duration query
-        avg_query = f"SELECT AVG(duration) FROM conversations {where_clause}"
-        if where_clause:
-            avg_query += " AND duration IS NOT NULL"
-        else:
-            avg_query += " WHERE duration IS NOT NULL"
+            return [{
+                'id': msg.id,
+                'role': msg.role,
+                'content': msg.content,
+                'timestamp': msg.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            } for msg in messages]
+        finally:
+            session.close()
+    
+    def get_all_conversations(self, agent_id: int = None, limit: int = 100) -> List[Dict]:
+        """Get all conversations, optionally filtered by agent_id"""
+        session = self.Session()
+        try:
+            query = session.query(Conversation)
             
-        cursor.execute(avg_query, params)
-        avg = cursor.fetchone()[0]
-        avg_duration = avg if avg else 0
-        
-        cursor.execute(f"SELECT SUM(message_count) FROM conversations {where_clause}", params)
-        total = cursor.fetchone()[0]
-        total_messages = total if total else 0
-        
-        # Calculate Leads (Conversations with Positive sentiment)
-        leads_query = f"SELECT COUNT(*) FROM conversations {where_clause}"
-        if where_clause:
-            leads_query += " AND sentiment LIKE '%Positive%'"
-        else:
-            leads_query += " WHERE sentiment LIKE '%Positive%'"
+            if agent_id is not None:
+                query = query.filter_by(agent_id=agent_id)
             
-        cursor.execute(leads_query, params)
-        leads_count = cursor.fetchone()[0]
-        
-        conn.close()
-        
-        return {
-            "total_calls": total_calls,
-            "average_duration": round(avg_duration, 2),
-            "total_messages": total_messages,
-            "leads_count": leads_count
-        }
-
-    # ========== Admin Methods ==========
+            conversations = query.order_by(Conversation.timestamp.desc()).limit(limit).all()
+            
+            return [{
+                'id': conv.id,
+                'agent_id': conv.agent_id,
+                'timestamp': conv.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                'duration': conv.duration,
+                'message_count': conv.message_count,
+                'summary': conv.summary,
+                'sentiment': conv.sentiment
+            } for conv in conversations]
+        finally:
+            session.close()
+    
+    def delete_conversation(self, conversation_id: int):
+        """Delete a conversation and all its messages"""
+        session = self.Session()
+        try:
+            conversation = session.query(Conversation).filter_by(id=conversation_id).first()
+            if conversation:
+                session.delete(conversation)
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error deleting conversation: {e}")
+            raise
+        finally:
+            session.close()
+    
+    def get_statistics(self, agent_id: int = None) -> Dict:
+        """Get conversation statistics"""
+        session = self.Session()
+        try:
+            query = session.query(Conversation)
+            
+            if agent_id is not None:
+                query = query.filter_by(agent_id=agent_id)
+            
+            total_conversations = query.count()
+            total_messages = query.with_entities(func.sum(Conversation.message_count)).scalar() or 0
+            avg_duration = query.with_entities(func.avg(Conversation.duration)).scalar() or 0
+            
+            return {
+                'total_conversations': total_conversations,
+                'total_messages': int(total_messages),
+                'average_duration': round(float(avg_duration), 2) if avg_duration else 0
+            }
+        finally:
+            session.close()
+    
     def get_system_stats(self) -> Dict:
-        """Get system-wide statistics for Admin"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM users")
-        total_users = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM agents")
-        total_agents = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM conversations")
-        total_calls = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM conversations WHERE sentiment LIKE '%Positive%'")
-        total_leads = cursor.fetchone()[0]
-        
-        conn.close()
-        
-        return {
-            "total_users": total_users,
-            "total_agents": total_agents,
-            "total_calls": total_calls,
-            "total_leads": total_leads
-        }
-
-    def get_all_users(self) -> List[Dict]:
-        """Get list of all users for Admin"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # Correct query to get agent count per user
-        users = []
-        cursor.execute("SELECT id, email, full_name, created_at, last_login FROM users ORDER BY created_at DESC")
-        rows = cursor.fetchall()
-        
-        for row in rows:
-            user = dict(row)
-            # Get agent count
-            cursor.execute("SELECT COUNT(*) FROM agents WHERE user_id = ?", (user['id'],))
-            user['agent_count'] = cursor.fetchone()[0]
-            # Get call count
-            # Use JOIN to count calls via agents? Or via user_id in conversations (since I implemented data isolation, does conversation have user_id?)
-            # I added user_id to conversations table in `init_database` in auth.py step but did I populate it?
-            # `start_call` does NOT explicitly save user_id to conversations table yet? 
-            # Wait, `auth_manager.create_auth_tables` added `user_id` column.
-            # But `db.create_conversation` DOES NOT INSERT IT.
-            # So `conversations.user_id` IS NULL for all calls!
-            # Admin stats for "calls per user" will be hard.
-            # For now I will just show agent count.
-            users.append(user)
+        """Get system-wide statistics (for admin)"""
+        session = self.Session()
+        try:
+            total_conversations = session.query(Conversation).count()
+            total_messages = session.query(Message).count()
+            avg_duration = session.query(func.avg(Conversation.duration)).scalar() or 0
             
-        conn.close()
-        return users
-
-    # ========== Helper Methods for Call State ==========
+            # Get unique agents count (if you have an agents table, adjust accordingly)
+            unique_agents = session.query(Conversation.agent_id).distinct().count()
+            
+            return {
+                'total_conversations': total_conversations,
+                'total_messages': total_messages,
+                'average_duration': round(float(avg_duration), 2) if avg_duration else 0,
+                'active_agents': unique_agents
+            }
+        finally:
+            session.close()
+    
+    def close(self):
+        """Close database connections"""
+        self.Session.remove()
+        self.engine.dispose()
+    
+    # ========== Metadata Management ==========
+    
     def update_conversation_metadata(self, conversation_id: int, metadata: Dict):
-        """Store metadata like start_time for conversations"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Create metadata table if doesn't exist
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS conversation_metadata (
-                conversation_id INTEGER PRIMARY KEY,
-                metadata TEXT NOT NULL,
-                FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE
-            )
-        ''')
-        
-        # Store metadata as JSON
-        metadata_json = json.dumps(metadata)
-        cursor.execute('''
-            INSERT OR REPLACE INTO conversation_metadata (conversation_id, metadata)
-            VALUES (?, ?)
-        ''', (conversation_id, metadata_json))
-        
-        conn.commit()
-        conn.close()
+        """Store metadata like start_time and system_prompt for conversations"""
+        import json
+        session = self.Session()
+        try:
+            metadata_json = json.dumps(metadata)
+            
+            # Check if metadata exists
+            existing = session.query(ConversationMetadata).filter_by(
+                conversation_id=conversation_id
+            ).first()
+            
+            if existing:
+                existing.data = metadata_json
+            else:
+                new_metadata = ConversationMetadata(
+                    conversation_id=conversation_id,
+                    data=metadata_json
+                )
+                session.add(new_metadata)
+            
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error updating conversation metadata: {e}")
+            raise
+        finally:
+            session.close()
     
     def get_conversation_metadata(self, conversation_id: int) -> Dict:
         """Retrieve metadata for a conversation"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Create table if doesn't exist
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS conversation_metadata (
-                conversation_id INTEGER PRIMARY KEY,
-                metadata TEXT NOT NULL,
-                FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE
-            )
-        ''')
-        
-        cursor.execute(
-            "SELECT metadata FROM conversation_metadata WHERE conversation_id = ?",
-            (conversation_id,)
-        )
-        
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
-            return json.loads(row[0])
-        return {}
-    
-    def clear_all_data(self):
-        """Clear all data from database (for testing/reset)"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Delete all data
-        cursor.execute("DELETE FROM messages")
-        cursor.execute("DELETE FROM conversations")
-        cursor.execute("DELETE FROM conversation_metadata")
-        
-        conn.commit()
-        conn.close()
-        print("✅ All conversation data cleared")
+        import json
+        session = self.Session()
+        try:
+            metadata = session.query(ConversationMetadata).filter_by(
+                conversation_id=conversation_id
+            ).first()
+            
+            if metadata:
+                return json.loads(metadata.data)
+            return {}
+        finally:
+            session.close()

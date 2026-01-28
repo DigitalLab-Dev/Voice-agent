@@ -849,7 +849,42 @@ def get_admin_stats():
     if request.current_user['email'] != 'syedaliturab@gmail.com':
         return jsonify({"error": "Unauthorized"}), 403
         
-    stats = db.get_system_stats()
+    # Get conversation stats from database
+    db_stats = db.get_system_stats()
+    
+    # Query users and agents tables directly from auth_manager's database
+    import sqlite3
+    conn = sqlite3.connect(auth_manager.db_path)
+    cursor = conn.cursor()
+    
+    # Get total users
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total_users = cursor.fetchone()[0]
+    
+    # Get total agents
+    cursor.execute("SELECT COUNT(*) FROM agents")
+    total_agents = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    # Get leads count (conversations with positive sentiment)
+    from database import Conversation
+    session = db.Session()
+    try:
+        total_leads = session.query(Conversation).filter(
+            Conversation.sentiment.like('%Positive%')
+        ).count()
+    finally:
+        session.close()
+    
+    # Map to frontend-expected field names
+    stats = {
+        'total_users': total_users,
+        'total_agents': total_agents,
+        'total_calls': db_stats.get('total_conversations', 0),  # Rename for frontend
+        'total_leads': total_leads
+    }
+    
     return jsonify({"stats": stats})
 
 @app.route('/api/admin/users', methods=['GET'])
@@ -858,8 +893,38 @@ def get_admin_users():
     """Get all users for admin"""
     if request.current_user['email'] != 'syedaliturab@gmail.com':
         return jsonify({"error": "Unauthorized"}), 403
-        
-    users = db.get_all_users()
+    
+    # Query users directly from auth database with agent count
+    import sqlite3
+    conn = sqlite3.connect(auth_manager.db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Get all users with their agent count
+    cursor.execute("""
+        SELECT 
+            u.id,
+            u.email,
+            u.full_name,
+            u.created_at,
+            COUNT(a.id) as agent_count
+        FROM users u
+        LEFT JOIN agents a ON u.id = a.user_id
+        GROUP BY u.id, u.email, u.full_name, u.created_at
+        ORDER BY u.created_at DESC
+    """)
+    
+    users = []
+    for row in cursor.fetchall():
+        users.append({
+            'id': row['id'],
+            'email': row['email'],
+            'full_name': row['full_name'],
+            'created_at': row['created_at'],
+            'agent_count': row['agent_count']
+        })
+    
+    conn.close()
     return jsonify({"users": users})
 
 @app.route('/api/export/<int:conversation_id>', methods=['GET'])
