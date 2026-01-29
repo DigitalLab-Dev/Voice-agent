@@ -5,4 +5,4 @@ __pycache__/
 .venv
 *.pyc
 app.log
-logs/
+logs/# Force Railway rebuild - clear Python cache 1769681121
