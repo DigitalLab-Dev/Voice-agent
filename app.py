@@ -52,11 +52,15 @@ limiter = Limiter(
     storage_uri="memory://"
 )
 
-# Initialize database
+# Initialize database (will use PostgreSQL on Railway via DATABASE_URL)
 db = ConversationDatabase()
 
 # Initialize auth manager with database instance
 auth_manager = AuthManager(db)
+
+# Initialize admin user (runs on every startup, including Gunicorn)
+logger.info("Initializing admin user...")
+auth_manager.create_admin_user("syedaliturab@gmail.com", "Admin@123")
 
 logger.info("Application initialized successfully")
 
@@ -930,10 +934,6 @@ if __name__ == '__main__':
     os.makedirs('templates', exist_ok=True)
     os.makedirs('static/css', exist_ok=True)
     os.makedirs('static/js', exist_ok=True)
-    
-    # Initialize admin user on startup
-    logger.info("Initializing admin user...")
-    auth_manager.create_admin_user("syedaliturab@gmail.com", "Admin@123")
     
     # Get port from environment variable (Railway sets this)
     port = int(os.getenv('PORT', 5001))

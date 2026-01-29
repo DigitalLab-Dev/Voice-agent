@@ -258,3 +258,195 @@ def require_auth(f):
         return f(*args, **kwargs)
     
     return decorated_function
+
+    # ========== Pre-Signup Email Verification ==========
+    def send_pre_signup_verification(self, email: str) -> dict:
+        """Send verification code to email BEFORE creating account"""
+        import random
+        
+        try:
+            # Check if email already registered
+            existing = self.db.get_user_by_email(email)
+            if existing:
+                return {'success': False, 'error': 'Email already registered'}
+            
+            # Generate 6-digit code
+            code = str(random.randint(100000, 999999))
+            
+            # Store code with 10 minute expiry
+            expires_at = datetime.utcnow() + timedelta(minutes=10)
+            self.db.create_verification_code(email, code, expires_at)
+            
+            # Try to send email
+            email_sent = self.send_verification_email(email, code)
+            
+            if not email_sent:
+                print(f"⚠️ Email not sent. Verification code for {email}: {code}")
+            
+            return {'success': True, 'code': code}  # Return code for dev
+            
+        except Exception as e:
+            print(f"Error sending pre-signup verification: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def verify_pre_signup_code(self, email: str, code: str) -> dict:
+        """Verify pre-signup email code"""
+        try:
+            vc = self.db.get_verification_code(email, code)
+            if not vc:
+                return {'success': False, 'error': 'Code expired or not found'}
+            
+            # Check if expired
+            expires_at = datetime.fromisoformat(vc['expires_at'])
+            if datetime.utcnow() > expires_at:
+                self.db.delete_verification_code(email, code)
+                return {'success': False, 'error': 'Code expired'}
+            
+            # Code is valid - delete it to prevent reuse
+            self.db.delete_verification_code(email, code)
+            return {'success': True}
+            
+        except Exception as e:
+            print(f"Error verifying pre-signup code: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def resend_pre_signup_code(self, email: str) -> dict:
+        """Resend pre-signup verification code"""
+        return self.send_pre_signup_verification(email)
+    
+    # ========== Password Reset Methods ==========
+    def send_password_reset_email(self, email: str) -> dict:
+        """Send password reset code"""
+        import random
+        
+        try:
+            user = self.db.get_user_by_email(email)
+            if not user:
+                # Don't reveal if email exists
+                return {'success': True}
+            
+            # Generate 6-digit code
+            code = str(random.randint(100000, 999999))
+            
+            # Store code with 1 hour expiry
+            expires_at = datetime.utcnow() + timedelta(hours=1)
+            self.db.create_verification_code(email, code, expires_at)
+            
+            # Send email
+            email_sent = self.send_verification_email(email, code)
+            
+            if not email_sent:
+                print(f"⚠️ Reset code for {email}: {code}")
+            
+            return {'success': True}
+            
+        except Exception as e:
+            print(f"Error sending reset email: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def reset_password_with_code(self, email: str, code: str, new_password: str) -> dict:
+        """Reset password using code"""
+        try:
+            # Verify code
+            vc = self.db.get_verification_code(email, code)
+            if not vc:
+                return {'success': False, 'error': 'Invalid or expired code'}
+            
+            # Check expiry
+            expires_at = datetime.fromisoformat(vc['expires_at'])
+            if datetime.utcnow() > expires_at:
+                self.db.delete_verification_code(email, code)
+                return {'success': False, 'error': 'Code expired'}
+            
+            # Update password
+            user = self.db.get_user_by_email(email)
+            if not user:
+                return {'success': False, 'error': 'User not found'}
+            
+            password_hash = self.hash_password(new_password)
+            # Need to add update_user_password method to database.py
+            from database import User
+            session = self.db.Session()
+            try:
+                db_user = session.query(User).filter_by(email=email).first()
+                if db_user:
+                    db_user.password_hash = password_hash
+                    session.commit()
+            finally:
+                session.close()
+            
+            # Delete used code
+            self.db.delete_verification_code(email, code)
+            
+            return {'success': True}
+            
+        except Exception as e:
+            print(f"Error resetting password: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    # ========== Post-Signup Email Verification ==========
+    def send_verification_email(self, email: str, code: str = None) -> bool:
+        """Send verification code via email - simplified version"""
+        try:
+            smtp_host = os.getenv('SMTP_HOST')
+            smtp_port = int(os.getenv('SMTP_PORT', 587))
+            smtp_user = os.getenv('SMTP_USER')
+            smtp_password = os.getenv('SMTP_PASSWORD')
+            
+            if not all([smtp_host, smtp_user, smtp_password]):
+                print("SMTP not configured - skipping email")
+                return False
+            
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+            
+            msg = MIMEMultipart()
+            msg['From'] = smtp_user
+            msg['To'] = email
+            msg['Subject'] = 'Digital Lab - Verification Code'
+            
+            body = f"""
+            <html>
+            <body>
+                <h2>Welcome to Digital Lab!</h2>
+                <p>Your verification code is: <strong>{code}</strong></p>
+                <p>This code will expire in 10 minutes.</p>
+            </body>
+            </html>
+            """
+            
+            msg.attach(MIMEText(body, 'html'))
+            
+            server = smtplib.SMTP(smtp_host, smtp_port)
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+            server.quit()
+            
+            print(f"✅ Email sent to {email}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Email sending failed: {e}")
+            return False
+    
+    def verify_email_code(self, user_id: int, code: str) -> dict:
+        """Verify email code for post-signup verification"""
+        try:
+            user = self.db.get_user_by_id(user_id)
+            if not user:
+                return {'success': False, 'error': 'User not found'}
+            
+            return self.verify_pre_signup_code(user['email'], code)
+        except Exception as e:
+            print(f"Error verifying email code: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def resend_verification_email(self, email: str) -> dict:
+        """Resend verification email"""
+        return self.send_pre_signup_verification(email)
+    
+    def get_user(self, user_id: int) -> dict:
+        """Get user by ID (alias for compatibility)"""
+        return self.db.get_user_by_id(user_id)
