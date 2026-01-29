@@ -426,3 +426,22 @@ def require_auth(f):
     def decorated_function(*args, **kwargs):
         token = None
         
+        # Get token from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+        
+        if not token:
+            return jsonify({"error": "No token provided"}), 401
+        
+        result = auth_manager.verify_token(token)
+        
+        if not result['valid']:
+            return jsonify({"error": result.get('error', 'Invalid token')}), 401
+        
+        # Add user info to request
+        request.current_user = result
+        
+        return f(*args, **kwargs)
+    
+    return decorated_function
