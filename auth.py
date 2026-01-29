@@ -227,38 +227,7 @@ class AuthManager:
         self.db.verify_user(email)
         print(f"✅ Created admin user: {email}")
         return {'id': user_id, 'email': email}
-
-
-def require_auth(f):
-    """Decorator to require authentication for routes"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        token = None
-        
-        # Get token from Authorization header
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-        
-        if not token:
-            return jsonify({"error": "No token provided"}), 401
-        
-        # Import here to avoid circular dependency
-        from app import auth_manager
-        
-        # Verify token
-        result = auth_manager.verify_token(token)
-        
-        if not result['valid']:
-            return jsonify({"error": result.get('error', 'Invalid token')}), 401
-        
-        # Add user info to request
-        request.current_user = result
-        
-        return f(*args, **kwargs)
     
-    return decorated_function
-
     # ========== Pre-Signup Email Verification ==========
     def send_pre_signup_verification(self, email: str) -> dict:
         """Send verification code to email BEFORE creating account"""
@@ -364,7 +333,6 @@ def require_auth(f):
                 return {'success': False, 'error': 'User not found'}
             
             password_hash = self.hash_password(new_password)
-            # Need to add update_user_password method to database.py
             from database import User
             session = self.db.Session()
             try:
@@ -394,7 +362,7 @@ def require_auth(f):
             smtp_password = os.getenv('SMTP_PASSWORD')
             
             if not all([smtp_host, smtp_user, smtp_password]):
-                print("SMTP not configured - skipping email")
+                print("⚠️ SMTP not configured - skipping email")
                 return False
             
             import smtplib
@@ -450,3 +418,11 @@ def require_auth(f):
     def get_user(self, user_id: int) -> dict:
         """Get user by ID (alias for compatibility)"""
         return self.db.get_user_by_id(user_id)
+
+
+def require_auth(f):
+    """Decorator to require authentication for routes"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        token = None
+        
